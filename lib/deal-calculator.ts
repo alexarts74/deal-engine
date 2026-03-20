@@ -9,7 +9,7 @@ function buildCashFlow(
   supplier: SimulationInputs["supplier"],
   client: SimulationInputs["client1"],
 ): CashFlowRow[] {
-  const totalMonths = Math.max(supplier.dureeMois, client.dureeMois);
+  const totalMonths = client.dureeMois;
   if (totalMonths <= 0) return [];
 
   const rows: CashFlowRow[] = [];
@@ -18,20 +18,19 @@ function buildCashFlow(
     let cashOut = 0;
     let cashIn = 0;
 
-    // Cash Out: supplier payments
+    // Cash Out: supplier payments (stop at supplier duration or client duration)
     if (m === 1) {
       cashOut = supplier.premierLoyerHT;
     } else if (m <= supplier.dureeMois) {
       cashOut = supplier.mensualiteHT;
     }
-    if (m === supplier.dureeMois) {
+    // VR paid at end of supplier contract or end of client lease (whichever is first)
+    if (m === Math.min(supplier.dureeMois, totalMonths)) {
       cashOut += supplier.vr;
     }
 
     // Cash In: client payments
-    if (m <= client.dureeMois) {
-      cashIn = client.loyerFiHT + client.entretienMensuelHT;
-    }
+    cashIn = client.loyerFiHT + client.entretienMensuelHT;
     if (m === client.dureeMois) {
       cashIn += client.vo;
     }
@@ -75,15 +74,14 @@ export function calculateDeal(inputs: SimulationInputs): SimulationResult {
   let cashFlow2: CashFlowRow[] = [];
 
   if (client2.dureeMois > 0) {
-    cashFlow2 = buildCashFlow(supplier, client2);
-    const cashOut2 = cashFlow2.reduce((s, r) => s + r.cashOut, 0);
-    // CashIn for 2nd cycle = durée1*(loyer1+entretien1) + durée2*(loyer2+entretien2) + VO2
+    // Cycle 2: no supplier payments (already settled in cycle 1)
+    const zeroSupplier = { ...supplier, premierLoyerHT: 0, mensualiteHT: 0, vr: 0, dureeMois: 0 };
+    cashFlow2 = buildCashFlow(zeroSupplier, client2);
+    const cashOut2 = 0;
     const cashIn2 =
-      client1.dureeMois * (client1.loyerFiHT + client1.entretienMensuelHT) +
       client2.dureeMois * (client2.loyerFiHT + client2.entretienMensuelHT) +
       client2.vo;
     const depenses2Total = sumExpenses(expenses, (m) => m > client1.dureeMois);
-    const depensesGlobal = depenses1 + depenses2Total;
     const beneficeBrut2 = cashIn2 - cashOut2;
 
     cycle2 = {
@@ -91,8 +89,8 @@ export function calculateDeal(inputs: SimulationInputs): SimulationResult {
       cashIn: cashIn2,
       beneficeBrut: beneficeBrut2,
       interpretation: beneficeBrut2 < 0 ? "Deal à perte" : "Deal gagnant",
-      beneficeNet: beneficeBrut2 - depensesGlobal,
-      depensesTotal: depensesGlobal,
+      beneficeNet: beneficeBrut2 - depenses2Total,
+      depensesTotal: depenses2Total,
     };
   } else {
     cycle2 = {
